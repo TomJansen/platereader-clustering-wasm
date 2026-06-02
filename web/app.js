@@ -419,7 +419,7 @@ function plateExportData(result, group) {
   const headerHeight = 44;
   const dendrogramWidth = clusterMode === "toxin" ? 0 : 150;
   const dendrogramHeight = clusterMode === "nanobody" ? 0 : 96;
-  const rowLabelWidth = 160;
+  const rowLabelWidth = 60;
   const columnLabelHeight = 118;
   const cellWidth = 62;
   const cellHeight = 26;

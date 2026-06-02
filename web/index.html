@@ -32,7 +32,7 @@
     button.active:hover { background: #1d4ed8; }
 
     .row { display: flex; gap: 16px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
-    pre, code { background: #f6f8fa; padding: 8px; border-radius: 6px; overflow: auto; }
+    pre, code { background: #f6f8fa; padding: 8px; border-radius: 4px; overflow: auto; }
     table { border-collapse: collapse; width: 100%; margin-top: 12px; }
     th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
     .subtitle { 
@@ -93,9 +93,9 @@
     .controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
     .control-group { display: flex; flex-direction: column; gap: 4px; }
     .control-group label { font-size: 12px; font-weight: 600; color: #555; }
-    .control-group input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+    input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
     .cluster-mode { display: flex; gap: 8px; margin-top: 8px; }
-    .heatmap-wrap { border: 1px solid #ddd; border-radius: 6px; background: #f6f8fa; overflow: auto; min-height: 360px; margin-top: 8px; }
+    .heatmap-wrap { border: 1px solid #ddd; border-radius: 4px; background: #f6f8fa; overflow: auto; min-height: 360px; margin-top: 8px; }
     .cluster-view { --dendrogram-width: 150px; --dendrogram-height: 96px; --row-label-width: 60px; --column-width: 62px; display: grid; grid-template-columns: var(--dendrogram-width) max-content; grid-template-rows: var(--dendrogram-height) max-content; width: max-content; min-width: 100%; }
     .cluster-view.empty { width: 100%; min-height: 360px; display: flex; place-items: center; justify-content: center; }
     .cluster-view.toxin-mode { --dendrogram-width: 0px; }
@@ -169,7 +169,7 @@
       <button id="clusterBoth" type="button">Cluster both</button>
     </div>
   </div>
-  <div id="errorMessage" style="display:none; margin-top:8px; padding:10px 14px; background:#ffecec; border:1px solid #f99; border-radius:6px; color:#a00; font-size:13px;"></div>
+  <div id="errorMessage" style="display:none; margin-top:8px; padding:10px 14px; background:#ffecec; border:1px solid #f99; border-radius:4px; color:#a00; font-size:13px;"></div>
   <div class="heatmap-wrap">
     <div id="heatmap" class="cluster-view empty">Load a workbook to render the clustered heatmap.</div>
   </div>
@@ -178,7 +178,7 @@
     Clustering runs in-browser via <a href="https://webassembly.org" target="_blank" rel="noopener noreferrer">WebAssembly</a> (Rust).
     File parsing by <a href="https://sheetjs.com" target="_blank" rel="noopener noreferrer">SheetJS</a>.
     <br><br>
-    Made by <a href="https://github.com/TomJansen" target="_blank" rel="noopener noreferrer">Tom, licensed by GPL v3.0</a>.
+    Made by <a href="https://github.com/TomJansen" target="_blank" rel="noopener noreferrer">Tom</a>. Licensed under the GPL v3.0.
   </div>
 
   <script src="./xlsx.full.min.js"></script>

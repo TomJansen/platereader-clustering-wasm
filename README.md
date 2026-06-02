@@ -4,17 +4,21 @@ A browser-based tool for clustering plate-reader assay readouts by nanobody and 
 
 ## Features
 
-- Accepts `.xlsx`, `.xls`, and `.csv` files (drop multiple files at once)
+- Accepts `.xlsx`, `.xls`, and `.csv` files (drop multiple files at once) from Victor Nivo plate readers
 - Subtracts per-column background estimated from configurable background wells (default: `H09–H12`)
 - Masks heatmap cells below a configurable signal cutoff (default: 10× background)
-- Clusters rows and columns by average-linkage hierarchical clustering with Euclidean distance
+- Clusters rows and/or columns by average-linkage hierarchical clustering with Euclidean distance
 - Renders interactive dendrograms for nanobody rows, toxin columns, or both
-- Parses plate-reader comments such as `74-1 EL3` into plate `74-1` and toxin `EL3`
+- Parses plate-reader comments such as `TPL1274-1 EL3` into plate `TPL1274-1` and target `EL3`
 - Splits the heatmap into one clustered plot per plate number
-- Selects one representative row per flat cluster
-- Exports representative rows as CSV, or the full heatmap as PNG or SVG
+- Can export plots in png or svg formats
 
-## Build
+## Usage
+
+Try it out at https://tomjansen.github.io/anarci-wasm/
+
+
+### Build
 
 Requires [wasm-pack](https://rustwasm.github.io/wasm-pack/).
 
@@ -22,7 +26,7 @@ Requires [wasm-pack](https://rustwasm.github.io/wasm-pack/).
 wasm-pack build --target web --out-dir web/pkg
 ```
 
-Then serve the `web` directory:
+Then serve the `web` directory, for example with python:
 
 ```sh
 python3 -m http.server 8080 --directory web
@@ -30,7 +34,6 @@ python3 -m http.server 8080 --directory web
 
 Open `http://localhost:8080`.
 
-Or go to https://tomjansen.github.io/anarci-wasm/
 
 # License
 
