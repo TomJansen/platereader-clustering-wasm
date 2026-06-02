@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Viper Toxin Clustering (WASM)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      background: #f5f5f5;
+      color: #333;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      font-size: 1.5em;
+      margin-bottom: 4px;
+    }
+    h2 {
+      font-size: 1em;
+      margin-bottom: 4px;
+    }
+    button { font-weight: 600; padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc; background: #64748b; color: #fff; cursor: pointer;}
+    button:hover { background: #475569; }
+    #runButton,
+    button.active{
+      background-color: #2563eb
+    }
+    #runButton:hover,
+    button.active:hover { background: #1d4ed8; }
+
+    .row { display: flex; gap: 16px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+    pre, code { background: #f6f8fa; padding: 8px; border-radius: 6px; overflow: auto; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+    .subtitle { 
+      color: #666;
+      margin-bottom: 20px;
+      font-size: 0.9em;
+    }
+    .cluster-container {
+      margin-bottom:16px;
+    }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .pill { padding: 2px 8px; border-radius: 999px; background: #eef; display: inline-block; margin-right: 6px; }
+    .good { background: #e6ffed; }
+    .bad { background: #ffecec; }
+    .credits {
+      margin-top: 24px;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.8em;
+      color: #666;
+    }
+
+    /* heatmap-specific additions */
+    .upload-and-controls { display: flex; gap: 20px; align-items: flex-start; margin-top: 8px; flex-wrap: wrap; margin-bottom: 16px;}
+    .file-drop {
+      border: 2px dashed #ccc;
+      border-radius: 4px;
+      padding: 20px;
+      text-align: center;
+      color: #888;
+      cursor: pointer;
+      min-width: 250px;
+      width: 280px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      align-self: stretch;
+    }
+    .file-drop:hover, .file-drop.dragover { border-color: #2563eb; color: #2563eb; }
+    .file-drop input { display:none;}
+    .file-drop.drag-over { border-color: #555; background: #f0f0f0; }
+    .controls-stack { display: flex; flex-direction: column; gap: 0; }
+    .controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+    .control-group { display: flex; flex-direction: column; gap: 4px; }
+    .control-group label { font-size: 12px; font-weight: 600; color: #555; }
+    .control-group input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+    .cluster-mode { display: flex; gap: 8px; margin-top: 8px; }
+    .heatmap-wrap { border: 1px solid #ddd; border-radius: 6px; background: #f6f8fa; overflow: auto; min-height: 360px; margin-top: 8px; }
+    .cluster-view { --dendrogram-width: 150px; --dendrogram-height: 96px; --row-label-width: 60px; --column-width: 62px; display: grid; grid-template-columns: var(--dendrogram-width) max-content; grid-template-rows: var(--dendrogram-height) max-content; width: max-content; min-width: 100%; }
+    .cluster-view.empty { width: 100%; min-height: 360px; display: flex; place-items: center; justify-content: center; }
+    .cluster-view.toxin-mode { --dendrogram-width: 0px; }
+    .cluster-view.nanobody-mode { --dendrogram-height: 0px; }
+    .dendrogram-spacer { grid-column: 1; grid-row: 1; background: #fff; }
+    .top-dendrogram { grid-column: 2; grid-row: 1; inline-size: calc(var(--column-count) * var(--column-width) + var(--row-label-width)); block-size: var(--dendrogram-height); background: #fff; overflow: hidden; }
+    .top-dendrogram .dendrogram-svg { margin-left: var(--row-label-width); }
+    .left-dendrogram { grid-column: 1; grid-row: 2; inline-size: var(--dendrogram-width); block-size: calc(var(--row-count) * 30px + 138px); background: #fff; overflow: hidden; }
+    .left-dendrogram .dendrogram-svg { margin-top: 138px; }
+    .dendrogram-svg { display: block; overflow: visible; }
+    .dendrogram-svg line { stroke: #999; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+    .heatmap { grid-column: 2; grid-row: 2; display: grid; grid-template-columns: minmax(var(--row-label-width), max-content) repeat(var(--column-count, 1), var(--column-width)); align-items: stretch; width: max-content; min-width: 100%; }
+    .corner-cell, .column-label, .row-label, .value-cell { border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; }
+    .corner-cell, .column-label { position: sticky; top: 0; z-index: 2; background: #f6f8fa; }
+    .column-label { height: 138px; writing-mode: vertical-rl; transform: rotate(180deg); padding: 10px 4px; font-size: 11px; line-height: 1.1; text-align: left; overflow: hidden; }
+    .column-label strong, .column-label span { display: block; font-weight: 700; }
+    .column-label span { margin-top: 6px; font-size: 10px; }
+    .row-label { position: sticky; left: 0; z-index: 1; background: #fff; padding: 6px 10px; min-height: 30px; font-size: 12px; white-space: nowrap; cursor: pointer; user-select: none; }
+    .row-label:hover { background: #f6f8fa; }
+    .row-label.picked { background: #e6ffed; font-weight: 700; }
+    .row-label.selected { background: #ffeea9; }
+    .row-label.ineligible { opacity: 0.7; cursor: not-allowed; }
+    .value-cell { min-width: 62px; min-height: 30px; display: grid; place-items: center; padding: 0 3px; color: #fff; font-size: 10px; font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap; text-shadow: 0 1px 2px rgb(0 0 0 / 60%); }
+    .value-cell.picked { box-shadow: inset 0 0 0 2px #333; }
+    .plot-stack { display: flex; gap: 18px; width: max-content; min-width: 100%; padding: 14px; }
+    .plate-plot { border: 1px solid #ddd; background: #fff; }
+    .plate-header { position: sticky; left: 0; z-index: 3; display: flex; align-items: baseline; gap: 10px; inline-size: fit-content; min-inline-size: 220px; padding: 10px 12px; background: #fff; }
+    .plate-header span { font-size: 12px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>Platereader signal clustering</h1>
+  <p class="subtitle">Clusters assay readouts by nanobody and toxin in your browser using Rust/WASM.</p>
+
+  <div class="upload-and-controls">
+    <div class="file-drop" id="fileDrop">
+      <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple />
+      <span id="fileName">Drop plate-reader files (.xlsx, .xls, .csv) files here</span>
+    </div>
+
+    <div class="controls-stack">
+      <div class="controls">
+        <div class="control-group">
+          <label for="backgroundSuffix">Background wells</label>
+          <input id="backgroundSuffix" type="text" value="H09, H10, H11, H12" />
+        </div>
+        <div class="control-group">
+          <label for="cutoffMultiplier">Cutoff multiplier</label>
+          <input id="cutoffMultiplier" type="number" value="10" min="1" step="1" />
+        </div>
+        <div class="control-group">
+          <label for="clusterDistance">Cluster distance</label>
+          <input id="clusterDistance" type="number" value="0.5" min="0" step="0.05" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="runButton" type="button" disabled>Analyze</button>
+        <button id="downloadButton" type="button" disabled>Download representatives CSV</button>
+        <button id="downloadPickedButton" type="button" disabled>Download Picked (0)</button>
+        <button id="downloadPngButton" type="button" disabled>Download PNG</button>
+        <button id="downloadSvgButton" type="button" disabled>Download SVG</button>
+      </div>
+    </div>
+  </div>
+  <div class="cluster-container">
+    <h2>Clustering view</h2>
+    <div class="cluster-mode" role="group" aria-label="Cluster axis">
+      <button id="clusterNanobody" type="button" class="active">Cluster by binder</button>
+      <button id="clusterToxin" type="button">Cluster by target</button>
+      <button id="clusterBoth" type="button">Cluster both</button>
+    </div>
+  </div>
+  <div id="errorMessage" style="display:none; margin-top:8px; padding:10px 14px; background:#ffecec; border:1px solid #f99; border-radius:6px; color:#a00; font-size:13px;"></div>
+  <div class="heatmap-wrap">
+    <div id="heatmap" class="cluster-view empty">Load a workbook to render the clustered heatmap.</div>
+  </div>
+
+  <div class="credits">
+    Made by <a href="https://github.com/TomJansen" target="_blank" rel="noopener noreferrer">Tom</a>.
+    Clustering runs in-browser via <a href="https://webassembly.org" target="_blank" rel="noopener noreferrer">WebAssembly</a> (Rust).
+    File parsing by <a href="https://sheetjs.com" target="_blank" rel="noopener noreferrer">SheetJS</a>.
+    Hierarchical clustering uses average-linkage with Euclidean distance.
+  </div>
+
+  <script src="./xlsx.full.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
