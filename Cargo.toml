@@ -1,5 +1,5 @@
 [package]
-name = "viper-clustering-webapp"
+name = "platereader-signal-clustering"
 version = "0.1.0"
 edition = "2021"
 

@@ -1,4 +1,4 @@
-import init, { analyze_dataset, cluster_matrix } from "./pkg/viper_clustering_webapp.js";
+import init, { analyze_dataset, cluster_matrix } from "./pkg/platereader_signal_clustering.js";
 
 const STANDARD_BACKGROUND_WELLS = "H09, H10, H11, H12";
 
