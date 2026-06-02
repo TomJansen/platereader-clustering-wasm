@@ -30,4 +30,8 @@ python3 -m http.server 8080 --directory web
 
 Open `http://localhost:8080`.
 
-Or go to `https://tomjansen.github.io/platereader-clustering-wasm/`
+Or go to https://tomjansen.github.io/anarci-wasm/
+
+# License
+
+GPL v3.0
