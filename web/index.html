@@ -56,6 +56,19 @@
       color: #666;
     }
 
+    .credits {
+      margin-top: 24px;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.8em;
+      color: #666;
+  }
+
+    .credits a {
+      color: #2563eb;
+      text-decoration: none;
+  }
+
     /* heatmap-specific additions */
     .upload-and-controls { display: flex; gap: 20px; align-items: flex-start; margin-top: 8px; flex-wrap: wrap; margin-bottom: 16px;}
     .file-drop {
@@ -162,10 +175,10 @@
   </div>
 
   <div class="credits">
-    Made by <a href="https://github.com/TomJansen" target="_blank" rel="noopener noreferrer">Tom</a>.
     Clustering runs in-browser via <a href="https://webassembly.org" target="_blank" rel="noopener noreferrer">WebAssembly</a> (Rust).
     File parsing by <a href="https://sheetjs.com" target="_blank" rel="noopener noreferrer">SheetJS</a>.
-    Hierarchical clustering uses average-linkage with Euclidean distance.
+    <br><br>
+    Made by <a href="https://github.com/TomJansen" target="_blank" rel="noopener noreferrer">Tom</a>.
   </div>
 
   <script src="./xlsx.full.min.js"></script>
