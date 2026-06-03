@@ -8,7 +8,7 @@ const backgroundSuffix = document.querySelector("#backgroundSuffix");
 const cutoffMultiplier = document.querySelector("#cutoffMultiplier");
 const clusterDistance = document.querySelector("#clusterDistance");
 const runButton = document.querySelector("#runButton");
-const downloadButton = document.querySelector("#downloadButton");
+const selectRepsButton = document.querySelector("#selectRepsButton");
 const downloadPickedButton = document.querySelector("#downloadPickedButton");
 const downloadPngButton = document.querySelector("#downloadPngButton");
 const downloadSvgButton = document.querySelector("#downloadSvgButton");
@@ -91,7 +91,7 @@ runButton.addEventListener("click", () => {
 
     lastResult = analyze_dataset(dataset);
     renderResult(lastResult);
-    downloadButton.disabled = false;
+    selectRepsButton.disabled = false;
     downloadPngButton.disabled = false;
     downloadSvgButton.disabled = false;
     selectedRows.clear();
@@ -106,24 +106,51 @@ runButton.addEventListener("click", () => {
   errorMessage.style.display = "none";
 });
 
-downloadButton.addEventListener("click", () => {
-  if (!lastResult) return;
+function getRepPickIds() {
+  if (!lastResult) return [];
+  const repLabels = new Set(lastResult.representatives.map((r) => r.label));
+  const plateGroups = groupColumnsByPlate(lastResult.columns);
+  const ids = [];
+  plateGroups.forEach((group) => {
+    lastResult.rows.forEach((row, rowIndex) => {
+      if (repLabels.has(row.label)) {
+        ids.push(`${group.plate}::${rowIndex}`);
+      }
+    });
+  });
+  return ids;
+}
 
-  const csv = ["Cluster,VHH"]
-    .concat(lastResult.representatives.map((row) => `${row.cluster},${csvCell(row.label)}`))
-    .join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "representatives.csv";
-  link.click();
-  URL.revokeObjectURL(url);
+function updateSelectRepsButton() {
+  if (!lastResult) return;
+  const repIds = getRepPickIds();
+  const allSelected = repIds.length > 0 && repIds.every((id) => selectedRows.has(id));
+  selectRepsButton.textContent = allSelected ? "Deselect representatives" : "Select representatives";
+}
+
+selectRepsButton.addEventListener("click", () => {
+  if (!lastResult) return;
+  const repIds = getRepPickIds();
+  const allSelected = repIds.every((id) => selectedRows.has(id));
+  if (allSelected) {
+    repIds.forEach((id) => selectedRows.delete(id));
+  } else {
+    repIds.forEach((id) => selectedRows.add(id));
+  }
+  document.querySelectorAll(".row-label").forEach((el) => {
+    if (repIds.includes(el.dataset.pickId)) {
+      el.classList.toggle("selected", selectedRows.has(el.dataset.pickId));
+    }
+  });
+  updatePickedButton();
+  updateSelectRepsButton();
 });
 
 function updatePickedButton() {
   const count = selectedRows.size;
   downloadPickedButton.textContent = `Download Picked (${count})`;
   downloadPickedButton.disabled = count === 0;
+  updateSelectRepsButton();
 }
 
 downloadPickedButton.addEventListener("click", () => {
