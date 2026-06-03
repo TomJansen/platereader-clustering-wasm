@@ -45,12 +45,16 @@ struct AnalysisResult {
 #[derive(Debug, Deserialize)]
 struct ClusterInput {
     matrix: Vec<Vec<f64>>,
+    #[serde(default)]
+    distance: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
 struct ClusterResult {
     order: Vec<usize>,
     tree: TreeNode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clusters: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,9 +128,11 @@ pub fn cluster_matrix(input: JsValue) -> Result<JsValue, JsValue> {
     }
 
     let tree = hierarchical_cluster(&input.matrix);
+    let clusters = input.distance.map(|threshold| flat_clusters(&tree, threshold));
     let result = ClusterResult {
         order: leaf_order(&tree),
         tree: serialize_tree(&tree),
+        clusters,
     };
     serde_wasm_bindgen::to_value(&result)
         .map_err(|err| JsValue::from_str(&format!("Could not serialize cluster: {err}")))

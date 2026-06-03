@@ -24,6 +24,7 @@ let lastResult = null;
 let lastColumnFiles = [];
 let clusterMode = "nanobody";
 let selectedRows = new Set();
+let plateClusters = new Map();
 
 await init();
 
@@ -108,15 +109,30 @@ runButton.addEventListener("click", () => {
 
 function getRepPickIds() {
   if (!lastResult) return [];
-  const repLabels = new Set(lastResult.representatives.map((r) => r.label));
   const plateGroups = groupColumnsByPlate(lastResult.columns);
   const ids = [];
   plateGroups.forEach((group) => {
-    lastResult.rows.forEach((row, rowIndex) => {
-      if (repLabels.has(row.label)) {
-        ids.push(`${group.plate}::${rowIndex}`);
-      }
-    });
+    const rowCluster = plateClusters.get(group.plate);
+    if (rowCluster && rowCluster.clusters) {
+      const clusterBest = new Map();
+      rowCluster.order.forEach((rowIndex) => {
+        const clusterId = rowCluster.clusters[rowIndex];
+        const row = lastResult.rows[rowIndex];
+        
+        const score = group.columns.reduce((sum, col) => sum + row.masked_log_values[col.index], 0);
+        
+        if (score > 0) {
+          const currentBest = clusterBest.get(clusterId);
+          if (!currentBest || score > currentBest.score) {
+            clusterBest.set(clusterId, { rowIndex, score });
+          }
+        }
+      });
+
+      clusterBest.forEach((best) => {
+        ids.push(`${group.plate}::${best.rowIndex}`);
+      });
+    }
   });
   return ids;
 }
@@ -428,7 +444,7 @@ function plateExportData(result, group) {
   const rowMatrix = result.rows.map((row) =>
     group.columns.map((column) => row.masked_log_values[column.index]),
   );
-  const rowCluster = cluster_matrix({ matrix: rowMatrix });
+  const rowCluster = cluster_matrix({ matrix: rowMatrix, distance: Number(clusterDistance.value) || 0.5 });
   const columnCluster = cluster_matrix({ matrix: transpose(rowMatrix) });
   const localColumnOrder =
     clusterMode === "toxin" || clusterMode === "both"
@@ -932,6 +948,8 @@ function renderResult(result) {
   heatmap.style.removeProperty("--row-count");
   heatmap.replaceChildren();
 
+  plateClusters.clear();
+
   plateGroups.forEach((group) => {
     heatmap.append(renderPlatePlot(result, group));
   });
@@ -942,7 +960,8 @@ function renderPlatePlot(result, group) {
   const rowMatrix = result.rows.map((row) =>
     group.columns.map((column) => row.masked_log_values[column.index]),
   );
-  const rowCluster = cluster_matrix({ matrix: rowMatrix });
+  const rowCluster = cluster_matrix({ matrix: rowMatrix, distance: Number(clusterDistance.value) || 0.5 });
+  plateClusters.set(group.plate, rowCluster);
   const columnCluster = cluster_matrix({ matrix: transpose(rowMatrix) });
   const localColumnOrder =
     clusterMode === "toxin" || clusterMode === "both"
