@@ -2,7 +2,7 @@ import init, { analyze_dataset, cluster_matrix } from "./pkg/platereader_signal_
 
 const STANDARD_BACKGROUND_WELLS = "H09, H10, H11, H12";
 
-const CSV_DEST_PLATE_PREFIX = "M";
+const CSV_DEST_PLATE_PREFIX = "MA";
 const CSV_DEST_PLATE_COLS = 12;
 const CSV_DEST_PLATE_FULL_ROWS = 7; // Rows A-G (84 wells)
 const CSV_DEST_PLATE_USABLE_WELLS = 94; // Total wells before skipping
@@ -215,7 +215,7 @@ downloadPickedButton.addEventListener("click", () => {
     if (wellPos === CSV_DEST_PLATE_USABLE_WELLS) {
       const plate = `${CSV_DEST_PLATE_PREFIX}${destPlateNum}`;
       CSV_DEST_PLATE_SKIPPED_WELLS.forEach((well) => {
-        csvRows.push(["", "", plate, well, "EMPTY"].join(","));
+        csvRows.push(["EMPTY", "EMPTY", "EMPTY", plate, well, ""].join(","));
       });
       csvRows.push("");
       destPlateNum++;
@@ -237,16 +237,17 @@ downloadPickedButton.addEventListener("click", () => {
       col = wellPos - fullRowsWells;
     }
     const destWell = `${wellLetters[row]}${String(col + 1).padStart(2, "0")}`;
-    csvRows.push([csvCell(sourcePlate), csvCell(sourceWell), csvCell(destPlate), csvCell(destWell), ""].join(","));
+    const clone = csvCell(`${sourcePlate}_${sourceWell}`);
+    csvRows.push([clone, csvCell(sourcePlate), csvCell(sourceWell), csvCell(destPlate), csvCell(destWell), ""].join(","));
     wellPos++;
   }
   if (wellPos > 0) {
     const plate = `${CSV_DEST_PLATE_PREFIX}${destPlateNum}`;
     CSV_DEST_PLATE_SKIPPED_WELLS.forEach((well) => {
-      csvRows.push(["-", "-", plate, well, "EMPTY"].join(","));
+      csvRows.push(["EMPTY", "EMPTY", "EMPTY", plate, well, ""].join(","));
     });
   }
-  const csv = ["Source Plate,Well,Destination Plate,Destination Well,Done?"].concat(csvRows).join("\n");
+  const csv = ["Clone,MasterPlate,From well,To MasterActivePlate,To well,Done?"].concat(csvRows).join("\n");
   downloadBlob(new Blob([csv], { type: "text/csv" }), "picked.csv");
 });
 
