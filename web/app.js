@@ -2,6 +2,30 @@ import init, { analyze_dataset, cluster_matrix } from "./pkg/platereader_signal_
 
 const STANDARD_BACKGROUND_WELLS = "H09, H10, H11, H12";
 
+const CSV_DEST_PLATE_PREFIX = "M";
+const CSV_DEST_PLATE_COLS = 12;
+const CSV_DEST_PLATE_FULL_ROWS = 7; // Rows A-G (84 wells)
+const CSV_DEST_PLATE_USABLE_WELLS = 94; // Total wells before skipping
+const CSV_DEST_PLATE_SKIPPED_WELLS = ["H11", "H12"];
+
+const PARSE_RESULT_SHEET_REGEX = /result/i;
+const PARSE_PARAMETERS_SHEET_NAME = "parameters";
+const PARSE_PARAMETERS_CELL = "B6";
+const PARSE_COMMENT_REGEX = /(?:^|\n)\s*Comment:\s*([^\n\r]+)/i;
+const PARSE_ASSAY_LABEL_REGEX = /^(\d+(?:-\d+)?)\s+(.+)$/;
+const PARSE_WELL_COLUMN_KEYWORD = "well";
+
+const PARSE_LINEAR_WELL_COL = 0; // Col A (0-indexed)
+const PARSE_LINEAR_VALUE_COL = 1; // Col B (0-indexed)
+const PARSE_LINEAR_START_ROW = 16; // Row 17 (0-indexed)
+const PARSE_LINEAR_END_ROW = 111; // Row 112 (0-indexed)
+
+const PARSE_PLATE_GRID_START_ROW = 17; // Row 18 (0-indexed)
+const PARSE_PLATE_GRID_END_ROW = 24; // Row 25 (0-indexed)
+const PARSE_PLATE_GRID_START_COL = 1; // Col B (0-indexed)
+const PARSE_PLATE_GRID_END_COL = 12; // Col M (0-indexed)
+const PARSE_PLATE_GRID_ROW_LETTERS = "ABCDEFGH";
+
 const fileInput = document.querySelector("#fileInput");
 const fileName = document.querySelector("#fileName");
 const backgroundSuffix = document.querySelector("#backgroundSuffix");
@@ -153,8 +177,9 @@ selectRepsButton.addEventListener("click", () => {
   } else {
     repIds.forEach((id) => selectedRows.add(id));
   }
+  const repIdSet = new Set(repIds);
   document.querySelectorAll(".row-label").forEach((el) => {
-    if (repIds.includes(el.dataset.pickId)) {
+    if (repIdSet.has(el.dataset.pickId)) {
       el.classList.toggle("selected", selectedRows.has(el.dataset.pickId));
     }
   });
@@ -176,24 +201,22 @@ downloadPickedButton.addEventListener("click", () => {
     const row = lastResult.rows[Number(rowIndexStr)];
     return row ? { sourcePlate, sourceWell: row.label, cluster: row.cluster } : null;
   }).filter(Boolean).sort((a, b) => {
-    const plateCmp = a.sourcePlate.localeCompare(b.sourcePlate, undefined, { numeric: true, sensitivity: "base" });
+    const plateCmp = naturalCompare(a.sourcePlate, b.sourcePlate);
     if (plateCmp !== 0) return plateCmp;
-    const rowA = a.sourceWell.charCodeAt(0);
-    const rowB = b.sourceWell.charCodeAt(0);
-    if (rowA !== rowB) return rowA - rowB;
-    return parseInt(a.sourceWell.slice(1), 10) - parseInt(b.sourceWell.slice(1), 10);
+    return naturalCompare(a.sourceWell, b.sourceWell);
   });
 
   const wellLetters = "ABCDEFGH";
   const csvRows = [];
   let destPlateNum = 1;
-  let wellPos = 0; // 0..93 usable wells per plate (A01-H10, skipping H11-H12)
+  let wellPos = 0;
   let prevSourcePlate = null;
   for (const { sourcePlate, sourceWell } of picked) {
-    if (wellPos === 94) {
-      const plate = `M${destPlateNum}`;
-      csvRows.push(["", "", plate, "H11", "EMPTY"].join(","));
-      csvRows.push(["", "", plate, "H12", "EMPTY"].join(","));
+    if (wellPos === CSV_DEST_PLATE_USABLE_WELLS) {
+      const plate = `${CSV_DEST_PLATE_PREFIX}${destPlateNum}`;
+      CSV_DEST_PLATE_SKIPPED_WELLS.forEach((well) => {
+        csvRows.push(["", "", plate, well, "EMPTY"].join(","));
+      });
       csvRows.push("");
       destPlateNum++;
       wellPos = 0;
@@ -202,24 +225,26 @@ downloadPickedButton.addEventListener("click", () => {
       csvRows.push("");
     }
     prevSourcePlate = sourcePlate;
-    const destPlate = `M${destPlateNum}`;
-    // Rows A-G use 12 columns, row H uses only columns 1-10
+    const destPlate = `${CSV_DEST_PLATE_PREFIX}${destPlateNum}`;
+
     let row, col;
-    if (wellPos < 84) { // 7 rows × 12 cols = 84
-      row = Math.floor(wellPos / 12);
-      col = wellPos % 12;
+    const fullRowsWells = CSV_DEST_PLATE_FULL_ROWS * CSV_DEST_PLATE_COLS;
+    if (wellPos < fullRowsWells) {
+      row = Math.floor(wellPos / CSV_DEST_PLATE_COLS);
+      col = wellPos % CSV_DEST_PLATE_COLS;
     } else {
-      row = 7; // H
-      col = wellPos - 84;
+      row = CSV_DEST_PLATE_FULL_ROWS;
+      col = wellPos - fullRowsWells;
     }
     const destWell = `${wellLetters[row]}${String(col + 1).padStart(2, "0")}`;
     csvRows.push([csvCell(sourcePlate), csvCell(sourceWell), csvCell(destPlate), csvCell(destWell), ""].join(","));
     wellPos++;
   }
   if (wellPos > 0) {
-    const plate = `M${destPlateNum}`;
-    csvRows.push(["-", "-", plate, "H11", "EMPTY"].join(","));
-    csvRows.push(["-", "-", plate, "H12", "EMPTY"].join(","));
+    const plate = `${CSV_DEST_PLATE_PREFIX}${destPlateNum}`;
+    CSV_DEST_PLATE_SKIPPED_WELLS.forEach((well) => {
+      csvRows.push(["-", "-", plate, well, "EMPTY"].join(","));
+    });
   }
   const csv = ["Source Plate,Well,Destination Plate,Destination Well,Done?"].concat(csvRows).join("\n");
   downloadBlob(new Blob([csv], { type: "text/csv" }), "picked.csv");
@@ -502,7 +527,7 @@ function plateExportData(result, group) {
 }
 
 function svgExportHeader(group, x, y) {
-  const title = escapeXml(group.plate);
+  const title = escapeText(group.plate);
   const titleWidth = Math.max(0, String(group.plate).length * 10);
   return [
     `<rect x="${x}" y="${y}" width="${titleWidth + 100}" height="32" fill="#ffffff"/>`,
@@ -561,8 +586,8 @@ function svgExportHeatmap(result, group, exportData) {
 
   orderedColumns.forEach((column, columnIndex) => {
     const cellX = matrixX + rowLabelWidth + columnIndex * cellWidth;
-    const label = escapeXml(clipTextByLength(column.target || column.label, 18));
-    const plate = escapeXml(clipTextByLength(column.plate || "", 18));
+    const label = escapeText(clipTextByLength(column.target || column.label, 18));
+    const plate = escapeText(clipTextByLength(column.plate || "", 18));
     parts.push(
       `<rect x="${cellX}" y="${matrixY}" width="${cellWidth}" height="${columnLabelHeight}" fill="#f9fbfa" stroke="#edf0ee"/>`,
       `<text transform="translate(${cellX + cellWidth / 2} ${matrixY + columnLabelHeight - 10}) rotate(-90)" fill="#40504b" font-size="10" font-weight="700">${label}</text>`,
@@ -581,7 +606,7 @@ function svgExportHeatmap(result, group, exportData) {
     const isSelected = selectedRows.has(pickId);
     parts.push(
       `<rect x="${matrixX}" y="${rowY}" width="${rowLabelWidth}" height="${cellHeight}" fill="${isSelected ? "#fff3e6" : "#ffffff"}" stroke="#edf0ee"/>`,
-      `<text x="${matrixX + 10}" y="${rowY + cellHeight / 2 + 4}" fill="${isSelected ? "#e65100" : "#24302d"}" font-size="11" font-weight="${isSelected ? "700" : "400"}">${escapeXml(row.label)}</text>`,
+      `<text x="${matrixX + 10}" y="${rowY + cellHeight / 2 + 4}" fill="${isSelected ? "#e65100" : "#24302d"}" font-size="11" font-weight="${isSelected ? "700" : "400"}">${escapeText(row.label)}</text>`,
     );
 
     orderedColumns.forEach((column, columnPosition) => {
@@ -792,52 +817,41 @@ function readSheet(entry, name) {
     blankrows: false,
   });
 
-  const wellRowIndex = rows.findIndex((row) => String(row[0] ?? "").trim().toLowerCase() === "well");
-  if (wellRowIndex >= 0) {
-    const label = parametersComment(entry.workbook) || labelWithoutExtension(entry.fileName);
-    const body = rows.slice(wellRowIndex + 1);
-    const resultRows = body
-      .map((row) => ({
-        label: normalizeWellLabel(String(row[0] ?? "").trim()),
-        values: [Number(row[1] ?? 0)],
-      }))
-      .filter((row) => row.label && Number.isFinite(row.values[0]));
+  const lowerName = name.toLowerCase();
+  const label = parametersComment(entry.workbook) || labelWithoutExtension(entry.fileName);
+  const resultRows = [];
 
-    return {
-      kind: "plate",
-      sourceFiles: [entry.fileName],
-      sheet: {
-        name: label,
-        columns: [label],
-        rows: resultRows,
-      },
-    };
-  }
-
-  // Detect plate grid format: a header row with numeric column indices (1..N) in row[1..],
-  // followed by rows where row[0] is a single letter (A-H) and the rest are numeric values.
-  const plateGridHeaderIndex = rows.findIndex((row) => {
-    if (row[0] !== null && row[0] !== undefined && String(row[0]).trim() !== "") return false;
-    const numericCells = row.slice(1).filter((c) => c !== null && c !== undefined);
-    if (numericCells.length < 2) return false;
-    return numericCells.every((c, i) => Number(c) === i + 1);
-  });
-  if (plateGridHeaderIndex >= 0) {
-    const label = parametersComment(entry.workbook) || labelWithoutExtension(entry.fileName);
-    const colCount = rows[plateGridHeaderIndex].slice(1).filter((c) => c !== null && c !== undefined).length;
-    const body = rows.slice(plateGridHeaderIndex + 1);
-    const resultRows = [];
-    for (const row of body) {
-      const rowLetter = String(row[0] ?? "").trim();
-      if (!/^[A-Za-z]$/.test(rowLetter)) break;
-      for (let col = 1; col <= colCount; col++) {
-        const value = Number(row[col] ?? 0);
-        if (!Number.isFinite(value)) continue;
-        const wellLabel = `${rowLetter.toUpperCase()}${String(col).padStart(2, "0")}`;
+  if (lowerName.includes("well")) {
+    for (let r = PARSE_LINEAR_START_ROW; r <= PARSE_LINEAR_END_ROW; r++) {
+      const row = rows[r] || [];
+      const wellLabel = normalizeWellLabel(String(row[PARSE_LINEAR_WELL_COL] ?? "").trim());
+      const value = Number(row[PARSE_LINEAR_VALUE_COL] ?? 0);
+      if (wellLabel && Number.isFinite(value)) {
         resultRows.push({ label: wellLabel, values: [value] });
       }
     }
+  } else if (lowerName.includes("plate")) {
+    for (let r = PARSE_PLATE_GRID_START_ROW; r <= PARSE_PLATE_GRID_END_ROW; r++) {
+      const row = rows[r] || [];
+      const explicitLetter = String(row[0] ?? "").trim().toUpperCase();
+      const rowLetter = /^[A-Za-z]$/.test(explicitLetter)
+        ? explicitLetter
+        : PARSE_PLATE_GRID_ROW_LETTERS[r - PARSE_PLATE_GRID_START_ROW];
 
+      for (let c = PARSE_PLATE_GRID_START_COL; c <= PARSE_PLATE_GRID_END_COL; c++) {
+        const raw = row[c];
+        if (raw === null || raw === undefined || String(raw).trim() === "") continue;
+        const value = Number(raw);
+        if (!Number.isFinite(value)) continue;
+
+        const colNum = c - PARSE_PLATE_GRID_START_COL + 1;
+        const wellLabel = `${rowLetter}${String(colNum).padStart(2, "0")}`;
+        resultRows.push({ label: wellLabel, values: [value] });
+      }
+    }
+  }
+
+  if (resultRows.length > 0) {
     return {
       kind: "plate",
       sourceFiles: [entry.fileName],
@@ -849,33 +863,13 @@ function readSheet(entry, name) {
     };
   }
 
-  const headerRowIndex = rows.findIndex((row) => row.filter((cell) => cell !== null).length > 2);
-  if (headerRowIndex < 0) {
-    throw new Error(`Sheet '${name}' does not contain a usable table.`);
-  }
-
-  const header = rows[headerRowIndex].slice(1).map((cell) => String(cell ?? "").trim());
-  const body = rows.slice(headerRowIndex + 1);
-  const parsedRows = body
-    .map((row) => ({
-      label: normalizeWellLabel(String(row[0] ?? "").trim()),
-      values: header.map((_, index) => Number(row[index + 1] ?? 0)),
-    }))
-    .filter((row) => row.label && row.values.some((value) => Number.isFinite(value)));
-
-  return {
-    kind: "matrix",
-    sourceFiles: header.map(() => entry.fileName),
-    sheet: {
-      name,
-      columns: header,
-      rows: parsedRows,
-    },
-  };
+  throw new Error(
+    `Sheet '${name}' is not recognized. Ensure the sheet name contains 'well' or 'plate' and is from a Victor Nivo directly.`
+  );
 }
 
 function firstResultSheet(workbook) {
-  return workbook.SheetNames.find((name) => /result/i.test(name)) || workbook.SheetNames[0];
+  return workbook.SheetNames.find((name) => PARSE_RESULT_SHEET_REGEX.test(name)) || workbook.SheetNames[0];
 }
 
 function mergePlateReaderTables(tables) {
@@ -926,13 +920,13 @@ function normalizeWellLabel(label) {
 
 function parametersComment(workbook) {
   const parametersSheetName = workbook.SheetNames.find(
-    (name) => name.trim().toLowerCase() === "parameters",
+    (name) => name.trim().toLowerCase() === PARSE_PARAMETERS_SHEET_NAME,
   );
   if (!parametersSheetName) return "";
 
-  const cell = workbook.Sheets[parametersSheetName]?.B6;
+  const cell = workbook.Sheets[parametersSheetName]?.[PARSE_PARAMETERS_CELL];
   const text = String(cell?.w ?? cell?.v ?? "");
-  const match = text.match(/(?:^|\n)\s*Comment:\s*([^\n\r]+)/i);
+  const match = text.match(PARSE_COMMENT_REGEX);
   if (match?.[1]?.trim()) {
     return match[1].trim();
   }
@@ -979,7 +973,7 @@ function renderPlatePlot(result, group) {
 
   const header = document.createElement("header");
   header.className = "plate-header";
-  header.innerHTML = `<h2>${escapeHtml(group.plate)}</h2><span>${group.columns.length} targets</span>`;
+  header.innerHTML = `<h2>${escapeText(group.plate)}</h2><span>${group.columns.length} targets</span>`;
   section.append(header);
 
   const view = document.createElement("div");
@@ -1022,7 +1016,7 @@ function renderPlatePlot(result, group) {
     ]
       .filter(Boolean)
       .join("\n");
-    cell.innerHTML = `<strong>${escapeHtml(column.target || column.label)}</strong><span>${escapeHtml(
+    cell.innerHTML = `<strong>${escapeText(column.target || column.label)}</strong><span>${escapeText(
       column.plate || "",
     )}</span>`;
     matrix.append(cell);
@@ -1049,11 +1043,7 @@ function renderPlatePlot(result, group) {
       } else {
         selectedRows.add(pickId);
       }
-      document.querySelectorAll(".row-label").forEach((el) => {
-        if (el.dataset.pickId === pickId) {
-          el.classList.toggle("selected", selectedRows.has(pickId));
-        }
-      });
+      label.classList.toggle("selected", selectedRows.has(pickId));
       updatePickedButton();
     });
 
@@ -1108,7 +1098,7 @@ function updateClusterButtons() {
 }
 
 function parseAssayLabel(label) {
-  const match = String(label).trim().match(/^(\d+(?:-\d+)?)\s+(.+)$/);
+  const match = String(label).trim().match(PARSE_ASSAY_LABEL_REGEX);
   if (!match) {
     return { plate: "", target: String(label).trim() };
   }
@@ -1186,16 +1176,9 @@ function line(svg, x1, y1, x2, y2) {
   svg.append(path);
 }
 
-function escapeHtml(value) {
+function escapeText(value) {
   return String(value).replace(/[&<>"']/g, (char) => {
     const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-    return entities[char];
-  });
-}
-
-function escapeXml(value) {
-  return String(value).replace(/[&<>"']/g, (char) => {
-    const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" };
     return entities[char];
   });
 }
