@@ -13,7 +13,6 @@ const PARSE_PARAMETERS_SHEET_NAME = "parameters";
 const PARSE_PARAMETERS_CELL = "B6";
 const PARSE_COMMENT_REGEX = /(?:^|\n)\s*Comment:\s*([^\n\r]+)/i;
 const PARSE_ASSAY_LABEL_REGEX = /^(\d+(?:-\d+)?)\s+(.+)$/;
-const PARSE_WELL_COLUMN_KEYWORD = "well";
 
 const PARSE_LINEAR_WELL_COL = 0; // Col A (0-indexed)
 const PARSE_LINEAR_VALUE_COL = 1; // Col B (0-indexed)
@@ -108,9 +107,8 @@ runButton.addEventListener("click", () => {
       options: {
         all_sheets: false,
         background_suffix: backgroundSuffix.value.trim() || STANDARD_BACKGROUND_WELLS,
-        exclude_suffix: STANDARD_BACKGROUND_WELLS,
+        exclude_suffix: backgroundSuffix.value.trim() || STANDARD_BACKGROUND_WELLS,
         cutoff_multiplier: Number(cutoffMultiplier.value) || 10,
-        cluster_distance: Number(clusterDistance.value) || 0.5,
       },
     };
 
@@ -199,7 +197,7 @@ downloadPickedButton.addEventListener("click", () => {
   const picked = [...selectedRows].map((pickId) => {
     const [sourcePlate, rowIndexStr] = pickId.split("::");
     const row = lastResult.rows[Number(rowIndexStr)];
-    return row ? { sourcePlate, sourceWell: row.label, cluster: row.cluster } : null;
+    return row ? { sourcePlate, sourceWell: row.label } : null;
   }).filter(Boolean).sort((a, b) => {
     const plateCmp = naturalCompare(a.sourcePlate, b.sourcePlate);
     if (plateCmp !== 0) return plateCmp;
@@ -440,7 +438,7 @@ async function renderPlateGroupToPNG(result, group) {
   if (clusterMode === "nanobody" || clusterMode === "both") {
     drawExportDendrogram(ctx, rowCluster.tree, localRowOrder, "left", margin, heatmapY, cellHeight, dendrogramWidth);
   }
-  drawExportHeatmap(ctx, result, group, orderedColumns, orderedRows, matrixX, matrixY, rowLabelWidth, columnLabelHeight, cellWidth, cellHeight);
+  drawExportHeatmap(ctx, result, group, orderedColumns, orderedRows, localRowOrder, matrixX, matrixY, rowLabelWidth, columnLabelHeight, cellWidth, cellHeight);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -570,7 +568,7 @@ function svgExportDendrograms(exportData) {
 }
 
 function svgExportHeatmap(result, group, exportData) {
-  const { orderedColumns, orderedRows, layout } = exportData;
+  const { orderedColumns, orderedRows, localRowOrder, layout } = exportData;
   const {
     matrixX,
     matrixY,
@@ -602,7 +600,7 @@ function svgExportHeatmap(result, group, exportData) {
 
   orderedRows.forEach((row, rowPosition) => {
     const rowY = matrixY + columnLabelHeight + rowPosition * cellHeight;
-    const rowIndex = result.rows.indexOf(row);
+    const rowIndex = localRowOrder[rowPosition];
     const pickId = `${group.plate}::${rowIndex}`;
     const isSelected = selectedRows.has(pickId);
     parts.push(
@@ -678,7 +676,7 @@ function drawExportHeader(ctx, group, x, y, width) {
   ctx.fillText(`${group.columns.length} targets`, x + ctx.measureText(group.plate).width + 12, y + 8);
 }
 
-function drawExportHeatmap(ctx, result, group, columns, rows, x, y, rowLabelWidth, columnLabelHeight, cellWidth, cellHeight) {
+function drawExportHeatmap(ctx, result, group, columns, rows, rowOrder, x, y, rowLabelWidth, columnLabelHeight, cellWidth, cellHeight) {
   ctx.strokeStyle = "#edf0ee";
   ctx.lineWidth = 1;
   ctx.textBaseline = "middle";
@@ -709,7 +707,7 @@ function drawExportHeatmap(ctx, result, group, columns, rows, x, y, rowLabelWidt
   const max = result.stats.max_log;
   rows.forEach((row, rowPosition) => {
     const rowY = y + columnLabelHeight + rowPosition * cellHeight;
-    const rowIndex = result.rows.indexOf(row);
+    const rowIndex = rowOrder[rowPosition];
     const pickId = `${group.plate}::${rowIndex}`;
     ctx.fillStyle = selectedRows.has(pickId) ? "#fff3e6" : "#ffffff";
     ctx.fillRect(x, rowY, rowLabelWidth, cellHeight);
@@ -1025,13 +1023,14 @@ function renderPlatePlot(result, group) {
 
   const min = result.stats.min_nonzero_log;
   const max = result.stats.max_log;
-  orderedRows.forEach((row) => {
+  orderedRows.forEach((row, rowPosition) => {
     const label = document.createElement("div");
     label.className = "row-label";
     label.textContent = row.label;
 
-    const rowIndex = result.rows.indexOf(row);
+    const rowIndex = localRowOrder[rowPosition];
     const pickId = `${group.plate}::${rowIndex}`;
+    const plateCluster = rowCluster.clusters ? rowCluster.clusters[rowIndex] : 0;
 
     if (selectedRows.has(pickId)) {
       label.classList.add("selected");
@@ -1056,7 +1055,7 @@ function renderPlatePlot(result, group) {
       const cell = document.createElement("div");
       cell.className = "value-cell";
       cell.style.background = colorFor(masked, min, max);
-      cell.title = `${row.label} / ${column.label}: ${formatAssayValue(raw)} (cluster ${row.cluster})`;
+      cell.title = `${row.label} / ${column.label}: ${formatAssayValue(raw)} (cluster ${plateCluster})`;
       cell.textContent = formatAssayValue(raw);
       matrix.append(cell);
     });

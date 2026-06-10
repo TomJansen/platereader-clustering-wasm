@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Deserialize)]
@@ -27,18 +26,12 @@ struct Options {
     background_suffix: String,
     exclude_suffix: String,
     cutoff_multiplier: f64,
-    cluster_distance: f64,
 }
 
 #[derive(Debug, Serialize)]
 struct AnalysisResult {
     columns: Vec<String>,
     rows: Vec<OutputRow>,
-    representatives: Vec<Representative>,
-    row_order: Vec<usize>,
-    column_order: Vec<usize>,
-    row_tree: TreeNode,
-    column_tree: TreeNode,
     stats: Stats,
 }
 
@@ -60,26 +53,12 @@ struct ClusterResult {
 #[derive(Debug, Serialize)]
 struct OutputRow {
     label: String,
-    original_label: String,
     values: Vec<f64>,
-    log_values: Vec<f64>,
     masked_log_values: Vec<f64>,
-    cutoffs: Vec<f64>,
-    cluster: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct Representative {
-    cluster: usize,
-    label: String,
 }
 
 #[derive(Debug, Serialize)]
 struct Stats {
-    rows_loaded: usize,
-    rows_plotted: usize,
-    columns: usize,
-    background_rows: usize,
     min_nonzero_log: f64,
     max_log: f64,
 }
@@ -100,7 +79,6 @@ enum TreeNode {
 #[derive(Clone)]
 struct RowData {
     label: String,
-    original_label: String,
     values: Vec<f64>,
     cutoffs: Vec<f64>,
 }
@@ -149,8 +127,6 @@ fn analyze(dataset: InputDataset) -> Result<AnalysisResult, String> {
     }
 
     let mut rows = Vec::new();
-    let mut rows_loaded = 0;
-    let mut background_rows = 0;
     let background_suffixes = parse_suffixes(&dataset.options.background_suffix);
     let exclude_suffixes = parse_suffixes(&dataset.options.exclude_suffix);
 
@@ -170,14 +146,8 @@ fn analyze(dataset: InputDataset) -> Result<AnalysisResult, String> {
         }
 
         let backgrounds = background_signal(sheet, &background_suffixes)?;
-        background_rows += sheet
-            .rows
-            .iter()
-            .filter(|row| label_ends_with_any(&row.label, &background_suffixes))
-            .count();
 
         for row in &sheet.rows {
-            rows_loaded += 1;
             if label_ends_with_any(&row.label, &exclude_suffixes) {
                 continue;
             }
@@ -200,7 +170,6 @@ fn analyze(dataset: InputDataset) -> Result<AnalysisResult, String> {
 
             rows.push(RowData {
                 label,
-                original_label: row.label.clone(),
                 values,
                 cutoffs,
             });
@@ -231,25 +200,6 @@ fn analyze(dataset: InputDataset) -> Result<AnalysisResult, String> {
         })
         .collect::<Vec<_>>();
 
-    let row_tree = hierarchical_cluster(&masked);
-    let row_order = leaf_order(&row_tree);
-    let column_matrix = transpose(&masked);
-    let column_tree = hierarchical_cluster(&column_matrix);
-    let column_order = leaf_order(&column_tree);
-    let cluster_labels = flat_clusters(&row_tree, dataset.options.cluster_distance);
-
-    let mut first_by_cluster: HashMap<usize, String> = HashMap::new();
-    for row_index in &row_order {
-        first_by_cluster
-            .entry(cluster_labels[*row_index])
-            .or_insert_with(|| rows[*row_index].label.clone());
-    }
-    let mut representatives = first_by_cluster
-        .into_iter()
-        .map(|(cluster, label)| Representative { cluster, label })
-        .collect::<Vec<_>>();
-    representatives.sort_by_key(|rep| rep.cluster);
-
     let mut min_nonzero_log = f64::INFINITY;
     let mut max_log = f64::NEG_INFINITY;
     for row in &log_values {
@@ -276,28 +226,15 @@ fn analyze(dataset: InputDataset) -> Result<AnalysisResult, String> {
         .enumerate()
         .map(|(index, row)| OutputRow {
             label: row.label,
-            original_label: row.original_label,
             values: row.values,
-            cutoffs: row.cutoffs,
-            log_values: log_values[index].clone(),
             masked_log_values: masked[index].clone(),
-            cluster: cluster_labels[index],
         })
         .collect();
 
     Ok(AnalysisResult {
         columns,
         rows: output_rows,
-        representatives,
-        row_order,
-        column_order,
-        row_tree: serialize_tree(&row_tree),
-        column_tree: serialize_tree(&column_tree),
         stats: Stats {
-            rows_loaded,
-            rows_plotted: log_values.len(),
-            columns: dataset.sheets[0].columns.len(),
-            background_rows,
             min_nonzero_log,
             max_log,
         },
@@ -369,16 +306,6 @@ fn background_signal(sheet: &InputSheet, suffixes: &[String]) -> Result<Vec<f64>
 
 fn log10_floor(value: f64) -> f64 {
     value.max(1.0).log10()
-}
-
-fn transpose(matrix: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    if matrix.is_empty() {
-        return Vec::new();
-    }
-    let columns = matrix[0].len();
-    (0..columns)
-        .map(|column| matrix.iter().map(|row| row[column]).collect())
-        .collect()
 }
 
 #[derive(Clone)]
