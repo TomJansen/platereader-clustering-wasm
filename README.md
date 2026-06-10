@@ -15,8 +15,7 @@ A browser-based tool for clustering plate-reader assay readouts by nanobody and 
 
 ## Usage
 
-Try it out at https://tomjansen.github.io/anarci-wasm/
-
+Try it out at https://tomjansen.github.io/platereader-clustering-wasm/
 
 ### Build
 
