@@ -116,6 +116,10 @@
     .row-label { position: sticky; left: 0; z-index: 1; background: #fff; padding: 6px 10px; min-height: 30px; font-size: 12px; white-space: nowrap; cursor: pointer; user-select: none; }
     .row-label:hover { background: #f6f8fa; }
     .row-label.selected { background: #ffeea9; }
+    .row-label.seq-correct { background: #ffe98a; }
+    .row-label.seq-incorrect { background: #ffc266; }
+    .row-label.seq-correct:hover { background: #ffe070; }
+    .row-label.seq-incorrect:hover { background: #ffb84d; }
     .value-cell { min-width: 62px; min-height: 30px; display: grid; place-items: center; padding: 0 3px; color: #fff; font-size: 10px; font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap; text-shadow: 0 1px 2px rgb(0 0 0 / 60%); }
     .plot-stack { display: flex; gap: 18px; width: max-content; min-width: 100%; padding: 14px; }
     .plate-plot { border: 1px solid #ddd; background: #fff; }
@@ -155,6 +159,15 @@
         <button id="downloadPickedButton" type="button" disabled>Download Picked (0)</button>
         <button id="downloadPngButton" type="button" disabled>Download PNG</button>
         <button id="downloadSvgButton" type="button" disabled>Download SVG</button>
+      </div>
+
+      <div class="row">
+        <button id="correctFastaButton" type="button" disabled>Upload correct clones (FASTA)</button>
+        <button id="incorrectFastaButton" type="button" disabled>Upload incorrect clones (FASTA)</button>
+        <button id="clearFastaButton" type="button" disabled>Clear sequencing</button>
+        <span id="fastaSummary" style="font-size:12px; color:#666;"></span>
+        <input id="correctFastaInput" type="file" accept=".fasta,.fa,.fas,.fna,.txt" multiple style="display:none" />
+        <input id="incorrectFastaInput" type="file" accept=".fasta,.fa,.fas,.fna,.txt" multiple style="display:none" />
       </div>
     </div>
   </div>

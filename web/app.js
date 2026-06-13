@@ -12,7 +12,7 @@ const PARSE_RESULT_SHEET_REGEX = /result/i;
 const PARSE_PARAMETERS_SHEET_NAME = "parameters";
 const PARSE_PARAMETERS_CELL = "B6";
 const PARSE_COMMENT_REGEX = /(?:^|\n)\s*Comment:\s*([^\n\r]+)/i;
-const PARSE_ASSAY_LABEL_REGEX = /^(\d+(?:-\d+)?)\s+(.+)$/;
+const PARSE_ASSAY_LABEL_REGEX = /^(\S+)\s+(.+)$/;
 
 const PARSE_LINEAR_WELL_COL = 0; // Col A (0-indexed)
 const PARSE_LINEAR_VALUE_COL = 1; // Col B (0-indexed)
@@ -42,12 +42,22 @@ const clusterNanobody = document.querySelector("#clusterNanobody");
 const clusterToxin = document.querySelector("#clusterToxin");
 const errorMessage = document.querySelector("#errorMessage");
 
+const correctFastaButton = document.querySelector("#correctFastaButton");
+const incorrectFastaButton = document.querySelector("#incorrectFastaButton");
+const clearFastaButton = document.querySelector("#clearFastaButton");
+const correctFastaInput = document.querySelector("#correctFastaInput");
+const incorrectFastaInput = document.querySelector("#incorrectFastaInput");
+const fastaSummary = document.querySelector("#fastaSummary");
+
 let workbooks = [];
 let lastResult = null;
 let lastColumnFiles = [];
 let clusterMode = "nanobody";
 let selectedRows = new Set();
 let plateClusters = new Map();
+// Sequencing status keyed by `${plate}::${well}` (both lowercased).
+let correctClones = new Set();
+let incorrectClones = new Set();
 
 await init();
 
@@ -88,6 +98,8 @@ async function loadFiles(files) {
   }
 
   runButton.disabled = false;
+  correctFastaButton.disabled = false;
+  incorrectFastaButton.disabled = false;
 }
 
 runButton.addEventListener("click", () => {
@@ -603,8 +615,10 @@ function svgExportHeatmap(result, group, exportData) {
     const rowIndex = localRowOrder[rowPosition];
     const pickId = `${group.plate}::${rowIndex}`;
     const isSelected = selectedRows.has(pickId);
+    const seqStatus = sequencingStatusFor(group.plate, row.label);
+    const rowFill = seqStatus === "incorrect" ? "#ffc266" : seqStatus === "correct" ? "#ffe98a" : isSelected ? "#fff3e6" : "#ffffff";
     parts.push(
-      `<rect x="${matrixX}" y="${rowY}" width="${rowLabelWidth}" height="${cellHeight}" fill="${isSelected ? "#fff3e6" : "#ffffff"}" stroke="#edf0ee"/>`,
+      `<rect x="${matrixX}" y="${rowY}" width="${rowLabelWidth}" height="${cellHeight}" fill="${rowFill}" stroke="#edf0ee"/>`,
       `<text x="${matrixX + 10}" y="${rowY + cellHeight / 2 + 4}" fill="${isSelected ? "#e65100" : "#24302d"}" font-size="11" font-weight="${isSelected ? "700" : "400"}">${escapeText(row.label)}</text>`,
     );
 
@@ -709,7 +723,8 @@ function drawExportHeatmap(ctx, result, group, columns, rows, rowOrder, x, y, ro
     const rowY = y + columnLabelHeight + rowPosition * cellHeight;
     const rowIndex = rowOrder[rowPosition];
     const pickId = `${group.plate}::${rowIndex}`;
-    ctx.fillStyle = selectedRows.has(pickId) ? "#fff3e6" : "#ffffff";
+    const seqStatus = sequencingStatusFor(group.plate, row.label);
+    ctx.fillStyle = seqStatus === "incorrect" ? "#ffc266" : seqStatus === "correct" ? "#ffe98a" : selectedRows.has(pickId) ? "#fff3e6" : "#ffffff";
     ctx.fillRect(x, rowY, rowLabelWidth, cellHeight);
     ctx.fillStyle = selectedRows.has(pickId) ? "#e65100" : "#24302d";
     ctx.font = `${selectedRows.has(pickId) ? "700" : "400"} 11px system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`;
@@ -807,6 +822,77 @@ function drawLine(ctx, x1, y1, x2, y2) {
 clusterBoth.addEventListener("click", () => setClusterMode("both"));
 clusterNanobody.addEventListener("click", () => setClusterMode("nanobody"));
 clusterToxin.addEventListener("click", () => setClusterMode("toxin"));
+
+correctFastaButton.addEventListener("click", () => correctFastaInput.click());
+incorrectFastaButton.addEventListener("click", () => incorrectFastaInput.click());
+clearFastaButton.addEventListener("click", () => {
+  correctClones.clear();
+  incorrectClones.clear();
+  correctFastaInput.value = "";
+  incorrectFastaInput.value = "";
+  applySequencingStatus();
+});
+
+correctFastaInput.addEventListener("change", () => loadFastaFiles(correctFastaInput.files, correctClones));
+incorrectFastaInput.addEventListener("change", () => loadFastaFiles(incorrectFastaInput.files, incorrectClones));
+
+async function loadFastaFiles(fileList, target) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  for (const file of files) {
+    const text = await file.text();
+    parseFastaIds(text).forEach((id) => target.add(id));
+  }
+  applySequencingStatus();
+}
+
+// Extract well keys (`${plate}::${well}`) from FASTA headers. Each header's clone
+// id is the first whitespace-delimited token, e.g. ">73-1_A01 description" -> 73-1 / A01.
+function parseFastaIds(text) {
+  const keys = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith(">")) continue;
+    const cloneId = line.slice(1).trim().split(/\s+/)[0];
+    const key = cloneKey(cloneId);
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
+// Split a clone id on its last underscore into plate + well, e.g. "73-1_A01".
+function cloneKey(cloneId) {
+  const underscore = cloneId.lastIndexOf("_");
+  if (underscore <= 0 || underscore === cloneId.length - 1) return "";
+  const plate = cloneId.slice(0, underscore);
+  const well = normalizeWellLabel(cloneId.slice(underscore + 1));
+  return wellKey(plate, well);
+}
+
+function wellKey(plate, well) {
+  return `${String(plate).trim().toLowerCase()}::${String(well).trim().toLowerCase()}`;
+}
+
+// Incorrect (orange) takes priority over correct (yellow) when a well is in both.
+function sequencingStatusFor(plate, well) {
+  const key = wellKey(plate, well);
+  if (incorrectClones.has(key)) return "incorrect";
+  if (correctClones.has(key)) return "correct";
+  return "";
+}
+
+function updateFastaSummary() {
+  const hasAny = correctClones.size > 0 || incorrectClones.size > 0;
+  clearFastaButton.disabled = !hasAny;
+  fastaSummary.textContent = hasAny
+    ? `${correctClones.size} correct, ${incorrectClones.size} incorrect`
+    : "";
+}
+
+// Re-render so highlighting reflects the current sequencing sets.
+function applySequencingStatus() {
+  updateFastaSummary();
+  if (lastResult) renderResult(lastResult);
+}
 
 function readSheet(entry, name) {
   const rows = XLSX.utils.sheet_to_json(entry.workbook.Sheets[name], {
@@ -1034,6 +1120,12 @@ function renderPlatePlot(result, group) {
 
     if (selectedRows.has(pickId)) {
       label.classList.add("selected");
+    }
+    const seqStatus = sequencingStatusFor(group.plate, row.label);
+    if (seqStatus === "correct") {
+      label.classList.add("seq-correct");
+    } else if (seqStatus === "incorrect") {
+      label.classList.add("seq-incorrect");
     }
     label.dataset.pickId = pickId;
 
