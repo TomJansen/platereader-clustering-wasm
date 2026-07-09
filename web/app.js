@@ -25,6 +25,15 @@ const PARSE_PLATE_GRID_START_COL = 1; // Col B (0-indexed)
 const PARSE_PLATE_GRID_END_COL = 12; // Col M (0-indexed)
 const PARSE_PLATE_GRID_ROW_LETTERS = "ABCDEFGH";
 
+const BAR_INK = "#0b0b0b";
+const BAR_MUTED = "#52514e";
+const BAR_FILL = "#2a78d6";
+const BAR_PICKED = "#e65100";
+const BAR_GRID = "#e6e6e3";
+const BAR_AXIS = "#c9c9c4";
+const BAR_BACKGROUND_LINE = "#d1342f";
+const BAR_BACKGROUND_DASH = [5, 4];
+
 const fileInput = document.querySelector("#fileInput");
 const fileName = document.querySelector("#fileName");
 const backgroundSuffix = document.querySelector("#backgroundSuffix");
@@ -51,6 +60,10 @@ const fastaSummary = document.querySelector("#fastaSummary");
 
 let workbooks = [];
 let lastResult = null;
+// Raw, pre-background-subtraction sheet handed to analyze_dataset. Bar charts plot
+// these signals; analyze_dataset both subtracts background and drops the background
+// wells, so lastResult cannot reproduce the full plate.
+let lastRawSheet = null;
 let lastColumnFiles = [];
 let clusterMode = "nanobody";
 let selectedRows = new Set();
@@ -124,6 +137,7 @@ runButton.addEventListener("click", () => {
       },
     };
 
+    lastRawSheet = sheets[0] || null;
     lastResult = analyze_dataset(dataset);
     renderResult(lastResult);
     selectRepsButton.disabled = false;
@@ -261,36 +275,48 @@ downloadPickedButton.addEventListener("click", () => {
   downloadBlob(new Blob([csv], { type: "text/csv" }), "picked.csv");
 });
 
-downloadPngButton.addEventListener("click", async () => {
-  if (!lastResult) return;
-  const plateGroups = groupColumnsByPlate(lastResult.columns);
-  if (plateGroups.length === 1) {
-    const blob = await renderPlateGroupToPNG(lastResult, plateGroups[0]);
-    downloadBlob(blob, `${plateGroups[0].plate || "heatmap"}.png`);
-  } else {
-    const files = await Promise.all(
-      plateGroups.map(async (group) => ({
-        name: `${group.plate || "heatmap"}.png`,
-        blob: await renderPlateGroupToPNG(lastResult, group),
-      })),
-    );
-    downloadBlob(await createZipBlob(files), "heatmaps.zip");
-  }
-});
+downloadPngButton.addEventListener("click", () => downloadPlots("png"));
+downloadSvgButton.addEventListener("click", () => downloadPlots("svg"));
 
-downloadSvgButton.addEventListener("click", async () => {
+// One archive per export: a heatmap per plate, plus a well-signal bar chart per
+// source sheet.
+async function downloadPlots(format) {
   if (!lastResult) return;
+  const isPng = format === "png";
   const plateGroups = groupColumnsByPlate(lastResult.columns);
-  if (plateGroups.length === 1) {
-    downloadBlob(renderPlateGroupToSVG(lastResult, plateGroups[0]), `${plateGroups[0].plate || "heatmap"}.svg`);
-  } else {
-    const files = plateGroups.map((group) => ({
-      name: `${group.plate || "heatmap"}.svg`,
-      blob: renderPlateGroupToSVG(lastResult, group),
-    }));
-    downloadBlob(await createZipBlob(files), "heatmaps.zip");
+  const usedHeatmaps = new Set();
+  const usedBars = new Set();
+  const files = [];
+
+  for (const group of plateGroups) {
+    files.push({
+      name: `heatmaps/${uniqueFileName(group.plate || "heatmap", usedHeatmaps)}.${format}`,
+      blob: isPng
+        ? await renderPlateGroupToPNG(lastResult, group)
+        : renderPlateGroupToSVG(lastResult, group),
+    });
+    for (const column of group.columns) {
+      files.push({
+        name: `bar_charts/${uniqueFileName(column.label, usedBars)}.${format}`,
+        blob: isPng
+          ? await renderBarChartToPNG(lastResult, group, column)
+          : renderBarChartToSVG(lastResult, group, column),
+      });
+    }
   }
-});
+
+  downloadBlob(await createZipBlob(files), "plots.zip");
+}
+
+function uniqueFileName(label, used) {
+  const base = String(label).trim().replace(/[^\w.-]+/g, "_") || "plot";
+  let name = base;
+  for (let suffix = 2; used.has(name); suffix++) {
+    name = `${base}_${suffix}`;
+  }
+  used.add(name);
+  return name;
+}
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -535,6 +561,251 @@ function plateExportData(result, group) {
       height,
     },
   };
+}
+
+// Per-sheet well signals, ranked highest to lowest, with the wells picked in the
+// UI called out. Mirrors plot_plate() in extract_well_signals.py: raw signals,
+// every well on the plate. result.rows cannot be used -- analyze_dataset returns
+// background-subtracted values and omits the background wells entirely.
+function barChartData(result, group, column) {
+  const pickedLabels = pickedLabelsFor(result, group);
+  const source = lastRawSheet?.rows || [];
+  const bars = source
+    .map((row) => ({
+      label: row.label,
+      value: row.values[column.index],
+      picked: pickedLabels.has(row.label),
+    }))
+    .filter((bar) => Number.isFinite(bar.value))
+    .sort((a, b) => b.value - a.value);
+
+  // The axis must clear the background line too, or it would render off the top of
+  // a plate whose wells all sit below background.
+  const backgroundMean = backgroundMeanFor(column);
+  const axisMax = niceCeiling(Math.max(0, backgroundMean ?? 0, ...bars.map((bar) => bar.value)));
+  const ticks = [];
+  for (let tick = 0; tick <= AXIS_TICKS; tick++) {
+    ticks.push((tick * axisMax) / AXIS_TICKS);
+  }
+
+  const scale = 2;
+  const margin = 16;
+  const titleHeight = 28;
+  const plotLeft = 64;
+  const slotWidth = 12;
+  const plotWidth = Math.max(1, bars.length) * slotWidth;
+  const plotHeight = 320;
+  const labelHeight = 34;
+  const plotX = margin + plotLeft;
+  const plotY = margin + titleHeight;
+
+  return {
+    bars,
+    ticks,
+    axisMax,
+    backgroundMean,
+    title: (column.plate ? `${column.plate} ${column.target}` : column.target) || column.label,
+    layout: {
+      scale,
+      margin,
+      titleHeight,
+      plotLeft,
+      slotWidth,
+      plotWidth,
+      plotHeight,
+      labelHeight,
+      plotX,
+      plotY,
+      width: margin * 2 + plotLeft + plotWidth,
+      height: margin * 2 + titleHeight + plotHeight + labelHeight,
+    },
+  };
+}
+
+// Mean raw signal of this column's background wells, matching background_signal()
+// in src/lib.rs: wells are selected by label suffix, and the mean is rounded.
+// Returns null when no well matches, so the chart simply omits the line.
+function backgroundMeanFor(column) {
+  const suffixes = (backgroundSuffix.value.trim() || STANDARD_BACKGROUND_WELLS)
+    .split(/[,;\s]+/)
+    .filter(Boolean);
+  if (!suffixes.length) return null;
+
+  const controls = (lastRawSheet?.rows || []).filter((row) =>
+    suffixes.some((suffix) => row.label.endsWith(suffix)),
+  );
+  const values = controls.map((row) => row.values[column.index]).filter(Number.isFinite);
+  if (!values.length) return null;
+
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+// selectedRows keys on the row index into result.rows, but bar charts iterate the
+// raw sheet, which has a different length and order. Bridge the two by well label.
+function pickedLabelsFor(result, group) {
+  const labels = new Set();
+  selectedRows.forEach((pickId) => {
+    const separator = pickId.lastIndexOf("::");
+    if (separator < 0 || pickId.slice(0, separator) !== group.plate) return;
+    const row = result.rows[Number(pickId.slice(separator + 2))];
+    if (row) labels.add(row.label);
+  });
+  return labels;
+}
+
+const AXIS_TICKS = 5;
+const NICE_STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+
+// Axis ceiling for `value`: pick a round *tick step* and multiply up, so every
+// gridline label is a whole number and the tallest bar still fills most of the
+// plot (10164 -> 12500 rather than the 20000 a plain 1/2/5 ceiling would give).
+// Signals are counts, so an integral step is always available.
+function niceCeiling(value) {
+  if (!(value > 0)) return AXIS_TICKS;
+  const rough = value / AXIS_TICKS;
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const normalized = rough / magnitude;
+  const step = NICE_STEPS.reduce((best, candidate) => {
+    const scaled = candidate * magnitude;
+    const usable = normalized <= candidate + 1e-9 && Number.isInteger(scaled);
+    return best === null && usable ? scaled : best;
+  }, null);
+  return Math.max(1, step ?? Math.ceil(rough)) * AXIS_TICKS;
+}
+
+function barY(value, chart) {
+  const { plotY, plotHeight } = chart.layout;
+  return plotY + plotHeight - (value / chart.axisMax) * plotHeight;
+}
+
+function formatTick(value) {
+  return Math.abs(value) >= 1000 ? Math.round(value).toLocaleString("en-US") : String(Math.round(value));
+}
+
+async function renderBarChartToPNG(result, group, column) {
+  const chart = barChartData(result, group, column);
+  const { scale, margin, plotX, plotY, plotWidth, plotHeight, slotWidth, width, height } = chart.layout;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is unavailable.");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = BAR_INK;
+  ctx.font = "700 14px system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(chart.title, margin, margin + 4);
+
+  ctx.strokeStyle = BAR_GRID;
+  ctx.lineWidth = 1;
+  ctx.font = "8px system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.textBaseline = "middle";
+  chart.ticks.forEach((tick) => {
+    const y = barY(tick, chart);
+    ctx.strokeStyle = BAR_GRID;
+    drawLine(ctx, plotX, y, plotX + plotWidth, y);
+    ctx.fillStyle = BAR_MUTED;
+    ctx.textAlign = "right";
+    ctx.fillText(formatTick(tick), plotX - 8, y);
+  });
+
+  const barWidth = slotWidth * 0.7;
+  chart.bars.forEach((bar, index) => {
+    const slotX = plotX + index * slotWidth;
+    const top = barY(bar.value, chart);
+    ctx.fillStyle = bar.picked ? BAR_PICKED : BAR_FILL;
+    ctx.fillRect(slotX + (slotWidth - barWidth) / 2, top, barWidth, plotY + plotHeight - top);
+
+    ctx.save();
+    ctx.translate(slotX + slotWidth / 2, plotY + plotHeight + 6);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = bar.picked ? BAR_PICKED : BAR_MUTED;
+    ctx.font = `${bar.picked ? "700" : "400"} 7px system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`;
+    ctx.fillText(bar.label, 0, 0);
+    ctx.restore();
+  });
+
+  ctx.strokeStyle = BAR_AXIS;
+  drawLine(ctx, plotX, plotY + plotHeight, plotX + plotWidth, plotY + plotHeight);
+
+  if (chart.backgroundMean !== null) {
+    const lineY = barY(chart.backgroundMean, chart);
+    ctx.save();
+    ctx.setLineDash(BAR_BACKGROUND_DASH);
+    ctx.strokeStyle = BAR_BACKGROUND_LINE;
+    ctx.lineWidth = 1.2;
+    drawLine(ctx, plotX, lineY, plotX + plotWidth, lineY);
+    ctx.restore();
+
+    // Right-aligned: bars are sorted descending, so the right edge is always clear.
+    ctx.fillStyle = BAR_BACKGROUND_LINE;
+    ctx.font = "700 8px system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`background ${formatTick(chart.backgroundMean)}`, plotX + plotWidth, lineY - 3);
+  }
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Canvas export failed."));
+    }, "image/png");
+  });
+}
+
+function renderBarChartToSVG(result, group, column) {
+  const chart = barChartData(result, group, column);
+  const { margin, plotX, plotY, plotWidth, plotHeight, slotWidth, width, height } = chart.layout;
+
+  const parts = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<rect width="100%" height="100%" fill="#ffffff"/>`,
+    `<style>text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}</style>`,
+    `<text x="${margin}" y="${margin + 14}" fill="${BAR_INK}" font-size="14" font-weight="700">${escapeText(chart.title)}</text>`,
+  ];
+
+  chart.ticks.forEach((tick) => {
+    const y = barY(tick, chart);
+    parts.push(
+      `<line x1="${plotX}" y1="${y.toFixed(2)}" x2="${plotX + plotWidth}" y2="${y.toFixed(2)}" stroke="${BAR_GRID}" stroke-width="1"/>`,
+      `<text x="${plotX - 8}" y="${(y + 3).toFixed(2)}" fill="${BAR_MUTED}" font-size="8" text-anchor="end">${formatTick(tick)}</text>`,
+    );
+  });
+
+  const barWidth = slotWidth * 0.7;
+  chart.bars.forEach((bar, index) => {
+    const slotX = plotX + index * slotWidth;
+    const top = barY(bar.value, chart);
+    const labelX = slotX + slotWidth / 2;
+    const labelY = plotY + plotHeight + 6;
+    parts.push(
+      `<rect x="${(slotX + (slotWidth - barWidth) / 2).toFixed(2)}" y="${top.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${(plotY + plotHeight - top).toFixed(2)}" fill="${bar.picked ? BAR_PICKED : BAR_FILL}"/>`,
+      `<text transform="translate(${labelX.toFixed(2)} ${labelY}) rotate(-90)" fill="${bar.picked ? BAR_PICKED : BAR_MUTED}" font-size="7" font-weight="${bar.picked ? "700" : "400"}" text-anchor="end" dy="2.5">${escapeText(bar.label)}</text>`,
+    );
+  });
+
+  parts.push(
+    `<line x1="${plotX}" y1="${plotY + plotHeight}" x2="${plotX + plotWidth}" y2="${plotY + plotHeight}" stroke="${BAR_AXIS}" stroke-width="1"/>`,
+  );
+
+  if (chart.backgroundMean !== null) {
+    const lineY = barY(chart.backgroundMean, chart).toFixed(2);
+    parts.push(
+      `<line x1="${plotX}" y1="${lineY}" x2="${plotX + plotWidth}" y2="${lineY}" stroke="${BAR_BACKGROUND_LINE}" stroke-width="1.2" stroke-dasharray="${BAR_BACKGROUND_DASH.join(" ")}"/>`,
+      `<text x="${plotX + plotWidth}" y="${(Number(lineY) - 3).toFixed(2)}" fill="${BAR_BACKGROUND_LINE}" font-size="8" font-weight="700" text-anchor="end">background ${formatTick(chart.backgroundMean)}</text>`,
+    );
+  }
+
+  parts.push(`</svg>`);
+
+  return new Blob([parts.join("")], { type: "image/svg+xml;charset=utf-8" });
 }
 
 function svgExportHeader(group, x, y) {
